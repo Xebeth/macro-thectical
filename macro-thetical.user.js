@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         macro-thetical
 // @namespace    http://paulbaker.io
-// @version      0.6.1
+// @version      0.6.2
 // @description  Reads my macros, prints out how many I have left, and some hypothetical foods I can still eat with my allowance :)
 // @author       Paul Nelson Baker, wguJohnKay, Xebeth
 // @match        https://www.fitbit.com/foods/log
@@ -14,6 +14,10 @@
 
 (function (jqueryInstance) {
     'use strict';
+
+    Number.prototype.round = function(places=2) {
+        return +(Math.round(this + "e+" + places) + "e-" + places);
+    }
 
     let MacroTastic = (function(jqueryInstance) {
 
@@ -60,7 +64,7 @@
             self.currentValues.carbs = self.parseMacroValue(carbsSelector);
             self.currentValues.fiber = self.parseMacroValue(fiberSelector);
             self.currentValues.protein = self.parseMacroValue(proteinSelector);
-            self.currentValues.total = Math.round(self.currentValues.fat * 9 + (self.currentValues.carbs - self.currentValues.fiber) * 4 + self.currentValues.protein * 4);
+            self.currentValues.total = (self.currentValues.fat * 9 + (self.currentValues.carbs - self.currentValues.fiber) * 4 + self.currentValues.protein * 4).round();
 
             return {
                 'fat': self.maxValues.fat - self.currentValues.fat,
@@ -110,13 +114,13 @@
         };
 
         MacroTastic.prototype.createColumn = function(substanceLabel, substanceAmount, substanceUnit, calorieAmount, totalAmount) {
-            const percentage = Math.round((calorieAmount/totalAmount) * 100);
+            const percentage = ((calorieAmount/totalAmount) * 100).round();
             let htmlValue = `
     <div class="total">
       <div class="label">
         <div class="substance">${substanceLabel} (${percentage}%)</div>
         <div class="amount">
-          ${substanceAmount} <span class="unit"> ${substanceUnit}</span>
+          ${substanceAmount.round()} <span class="unit"> ${substanceUnit}</span>
         </div>
        </div>
     </div>
