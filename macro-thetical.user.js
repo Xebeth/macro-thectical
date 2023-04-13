@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         macro-thetical
 // @namespace    http://paulbaker.io
-// @version      0.6.2
+// @version      0.6.3
 // @description  Reads my macros, prints out how many I have left, and some hypothetical foods I can still eat with my allowance :)
 // @author       Paul Nelson Baker, wguJohnKay, Xebeth
 // @match        https://www.fitbit.com/foods/log
 // @match        https://www.fitbit.com/foods/log/*
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @require      http://code.jquery.com/jquery-latest.js
 // @downloadURL  https://github.com/Xebeth/macro-thectical/raw/master/macro-thetical.user.js
 // @updateURL    https://github.com/Xebeth/macro-thectical/raw/master/macro-thetical.user.js
@@ -15,7 +16,7 @@
 (function (jqueryInstance) {
     'use strict';
 
-    Number.prototype.round = function(places=2) {
+    Number.prototype.round = function(places = 2) {
         return +(Math.round(this + "e+" + places) + "e-" + places);
     }
 
@@ -89,6 +90,19 @@
 
             let customRowsElement = self.$('div#my-custom-rows');
             let selector = 'div#' + rowElementId;
+
+            function toggleRow(collapsed, toggleSpan) {
+                const collapsible = toggleSpan.next();
+                const heightValue = collapsed ? '0px' : '100%';
+                const padding = collapsed ? '1px 21px 1px 19px' : '20px 21px 15px 19px';
+
+                toggleSpan.text(collapsed ? '🞃' : '🞁');
+                collapsible.css('height', heightValue);
+                collapsible.css('padding', padding);
+
+                return collapsed;
+            }
+
             if (self.$(selector).length === 0) {
                 customRowsElement.append(`<div id="${rowElementId}" class="container">
                     <span class="toggle" style="float:right;cursor:pointer;" title="${title}">🞁</span>
@@ -96,18 +110,18 @@
                 </div>`);
                 let resultElement = self.$(selector);
                 const hideSpan = resultElement.find(">:first-child");
+                const collapsed = GM_getValue(rowElementId + '-state');
 
                 hideSpan.click(function() {
+                    const collapsed = GM_getValue(rowElementId + '-state') || false;
                     const $self = self.$(this);
-                    const element = $self.next();
-                    const height = Number(element.css('height').replace('px',''));
-                    const heightValue = height ? '0px' : '100%';
-                    const padding = height ? '1px 21px 1px 19px' : '20px 21px 15px 19px';
 
-                    $self.text(height ? '🞃' : '🞁');
-                    element.css('height', heightValue);
-                    element.css('padding', padding);
+                    GM_setValue(rowElementId + '-state', toggleRow(!collapsed, $self));
                 });
+
+                if (collapsed) {
+                    toggleRow(collapsed, hideSpan);
+                }
 
                 rowInitializerCallback(hideSpan.next(), title);
             }
