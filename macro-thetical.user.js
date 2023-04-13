@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         macro-thetical
 // @namespace    http://paulbaker.io
-// @version      0.6
+// @version      0.6.1
 // @description  Reads my macros, prints out how many I have left, and some hypothetical foods I can still eat with my allowance :)
 // @author       Paul Nelson Baker, wguJohnKay, Xebeth
 // @match        https://www.fitbit.com/foods/log
@@ -64,8 +64,9 @@
 
             return {
                 'fat': self.maxValues.fat - self.currentValues.fat,
-                'carbs': self.maxValues.carbs - (self.currentValues.carbs + self.currentValues.fiber),
+                'carbs': self.maxValues.carbs - self.currentValues.carbs + self.currentValues.fiber,
                 'protein': self.maxValues.protein - self.currentValues.protein,
+                'total': self.maxValues.dailyCalories - self.currentValues.total
             };
         };
 
@@ -78,16 +79,33 @@
             }
         };
 
-        MacroTastic.prototype.createRow = function(rowElementId, rowInitializerCallback) {
+        MacroTastic.prototype.createRow = function(rowElementId, title, rowInitializerCallback) {
             let self = this;
             self.createRowContainer();
 
             let customRowsElement = self.$('div#my-custom-rows');
             let selector = 'div#' + rowElementId;
             if (self.$(selector).length === 0) {
-                customRowsElement.append('<div id=' + rowElementId + ' class="content"></div>');
+                customRowsElement.append(`<div id="${rowElementId}" class="container">
+                    <span class="toggle" style="float:right;cursor:pointer;" title="${title}">🞁</span>
+                    <div class="content" style="height:100%;overflow:hidden"></div>
+                </div>`);
                 let resultElement = self.$(selector);
-                rowInitializerCallback(resultElement);
+                const hideSpan = resultElement.find(">:first-child");
+
+                hideSpan.click(function() {
+                    const $self = self.$(this);
+                    const element = $self.next();
+                    const height = Number(element.css('height').replace('px',''));
+                    const heightValue = height ? '0px' : '100%';
+                    const padding = height ? '1px 21px 1px 19px' : '20px 21px 15px 19px';
+
+                    $self.text(height ? '🞃' : '🞁');
+                    element.css('height', heightValue);
+                    element.css('padding', padding);
+                });
+
+                rowInitializerCallback(hideSpan.next(), title);
             }
         };
 
@@ -107,27 +125,29 @@
         };
 
         MacroTastic.prototype.initializeCustomRows = function() {
-            this.createRow('adjusted-totals', rowElement => {
-                rowElement.append(this.$('<h3>Adjusted Macros</h3>'));
+            this.createRow('adjusted-totals', 'Adjusted Macros', (rowElement, title) => {
+                rowElement.append(this.$('<h3>' + title + '</h3>'));
                 rowElement.append(this.createColumn('Calories', this.currentValues.total, 'kCal', this.currentValues.total, this.maxValues.dailyCalories));
                 rowElement.append(this.createColumn('Fat', this.currentValues.fat, 'g', this.currentValues.fat * 9, this.currentValues.total));
-                rowElement.append(this.createColumn('Carbs', (this.currentValues.carbs - this.currentValues.fiber), 'g', (this.currentValues.carbs - this.currentValues.fiber) * 4, this.currentValues.total));
+                rowElement.append(this.createColumn('Net Carbs', (this.currentValues.carbs - this.currentValues.fiber), 'g', (this.currentValues.carbs - this.currentValues.fiber) * 4, this.currentValues.total));
                 rowElement.append(this.createColumn('Protein', this.currentValues.protein, 'g', this.currentValues.protein * 4, this.currentValues.total));
             });
 
-            this.createRow('my-max', rowElement => {
-                rowElement.append(this.$('<h3>Max Macros</h3>'));
+            this.createRow('my-max', 'Max Macros', (rowElement, title) => {
+                rowElement.append(this.$('<h3>' + title + '</h3>'));
+                rowElement.append(this.createColumn('Calories', this.maxValues.dailyCalories, 'kCal', this.maxValues.dailyCalories, this.maxValues.dailyCalories));
                 rowElement.append(this.createColumn('Fat', this.maxValues.fat, 'g', this.maxValues.fat * 9, this.maxValues.dailyCalories));
                 rowElement.append(this.createColumn('Net Carbs', this.maxValues.carbs, 'g', this.maxValues.carbs * 4, this.maxValues.dailyCalories));
                 rowElement.append(this.createColumn('Protein', this.maxValues.protein, 'g', this.maxValues.protein * 4, this.maxValues.dailyCalories));
             });
 
-            this.createRow('my-remainders', rowElement => {
+            this.createRow('my-remainders', 'Remaining Macros', (rowElement, title) => {
                 const remainingMacros = this.getRemainingMacros(this.maxValues);
-                rowElement.append(this.$('<h3>Remaining Macros</h3>'));
-                rowElement.append(this.createColumn('Fat', remainingMacros.fat, 'g', remainingMacros.fat * 9, this.maxValues.dailyCalories));
-                rowElement.append(this.createColumn('Net Carbs', remainingMacros.carbs, 'g', remainingMacros.carbs * 4, this.maxValues.dailyCalories));
-                rowElement.append(this.createColumn('Protein', remainingMacros.protein, 'g', remainingMacros.protein * 4, this.maxValues.dailyCalories));
+                rowElement.append(this.$('<h3>' + title + '</h3>'));
+                rowElement.append(this.createColumn('Calories', remainingMacros.total, 'kCal', remainingMacros.total, this.maxValues.dailyCalories));
+                rowElement.append(this.createColumn('Fat', remainingMacros.fat, 'g', remainingMacros.fat * 9, this.maxValues.fat * 9));
+                rowElement.append(this.createColumn('Net Carbs', remainingMacros.carbs, 'g', remainingMacros.carbs * 4, this.maxValues.carbs * 4));
+                rowElement.append(this.createColumn('Protein', remainingMacros.protein, 'g', remainingMacros.protein * 4, this.maxValues.protein * 4));
             });
         };
 
