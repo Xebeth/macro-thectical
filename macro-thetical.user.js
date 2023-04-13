@@ -1,39 +1,39 @@
 // ==UserScript==
 // @name         macro-thetical
 // @namespace    http://paulbaker.io
-// @version      0.5.9
+// @version      0.6
 // @description  Reads my macros, prints out how many I have left, and some hypothetical foods I can still eat with my allowance :)
-// @author       Paul Nelson Baker
+// @author       Paul Nelson Baker, wguJohnKay, Xebeth
 // @match        https://www.fitbit.com/foods/log
 // @match        https://www.fitbit.com/foods/log/*
 // @grant        none
 // @require      http://code.jquery.com/jquery-latest.js
-// @downloadURL  https://github.com/paul-nelson-baker/macro-thectical/raw/master/macro-thetical.user.js
-// @updateURL    https://github.com/paul-nelson-baker/macro-thectical/raw/master/macro-thetical.user.js
+// @downloadURL  https://github.com/Xebeth/macro-thectical/raw/master/macro-thetical.user.js
+// @updateURL    https://github.com/Xebeth/macro-thectical/raw/master/macro-thetical.user.js
 // ==/UserScript==
 
-/*
-My macros are based on my body height/type/shape and my
-fitness goals. Get yours from your personal trainer or online calculator :)
-
-Here is a popular calculator: https://ketogains.com/ketogains-calculator/
-*/
 (function (jqueryInstance) {
-'use strict';
+    'use strict';
 
     let MacroTastic = (function(jqueryInstance) {
 
         function MacroTastic(maxValues) {
             let self = this;
             self.maxValues = {};
-            self.maxValues.fat  = (maxValues.fat) ? maxValues.fat : 0;
-            self.maxValues.carbs = (maxValues.carbs) ? maxValues.carbs : 0;
-            self.maxValues.protein = (maxValues.protein) ? maxValues.protein : 0;
-            self.maxValues.weeklyCalories = (maxValues.weeklyCalories) ? maxValues.weeklyCalories : 0;
-            self.maxValues.dailyCalories  = (maxValues.dailyCalories) ? maxValues.dailyCalories : 0;
+            self.maxValues.fat = maxValues.fat || 0;
+            self.maxValues.carbs = maxValues.carbs || 0;
+            self.maxValues.protein = maxValues.protein || 0;
+            self.maxValues.dailyCalories = maxValues.dailyCalories || 0;
+
+            self.currentValues = {
+                fat: 0,
+                carbs: 0,
+                fiber: 0,
+                protein: 0,
+                total: 0
+            };
 
             self.$ = jqueryInstance;
-            console.log('Using max macros', self.maxValues);
             self.$("body").on('DOMSubtreeModified', "#foodlog", () => {
                 self.initializeCustomRows();
             });
@@ -55,10 +55,17 @@ Here is a popular calculator: https://ketogains.com/ketogains-calculator/
             let carbsSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(5) > div > div.amount';
             let fiberSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(4) > div > div.amount';
             let proteinSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(7) > div > div.amount';
+
+            self.currentValues.fat = self.parseMacroValue(fatSelector);
+            self.currentValues.carbs = self.parseMacroValue(carbsSelector);
+            self.currentValues.fiber = self.parseMacroValue(fiberSelector);
+            self.currentValues.protein = self.parseMacroValue(proteinSelector);
+            self.currentValues.total = Math.round(self.currentValues.fat * 9 + (self.currentValues.carbs - self.currentValues.fiber) * 4 + self.currentValues.protein * 4);
+
             return {
-                'fat': self.maxValues.fat - self.parseMacroValue(fatSelector),
-                'carbs': self.maxValues.carbs - self.parseMacroValue(carbsSelector) + self.parseMacroValue(fiberSelector),
-                'protein': self.maxValues.protein - self.parseMacroValue(proteinSelector),
+                'fat': self.maxValues.fat - self.currentValues.fat,
+                'carbs': self.maxValues.carbs - (self.currentValues.carbs + self.currentValues.fiber),
+                'protein': self.maxValues.protein - self.currentValues.protein,
             };
         };
 
@@ -68,7 +75,6 @@ Here is a popular calculator: https://ketogains.com/ketogains-calculator/
             let customRowsSelector = 'div#my-custom-rows';
             if (self.$(customRowsSelector).length === 0 || self.$(customRowsSelector).is(":hidden")) {
                 self.$('div#dailyTotals').append('<div id="my-custom-rows"></div>');
-                console.log('Creating row container', self.$(customRowsSelector)[0]);
             }
         };
 
@@ -82,46 +88,46 @@ Here is a popular calculator: https://ketogains.com/ketogains-calculator/
                 customRowsElement.append('<div id=' + rowElementId + ' class="content"></div>');
                 let resultElement = self.$(selector);
                 rowInitializerCallback(resultElement);
-                console.log('Creating row inside container', resultElement[0]);
             }
         };
 
-        MacroTastic.prototype.createColumn = function(substanceLabel, substanceAmount, substanceUnit=undefined) {
+        MacroTastic.prototype.createColumn = function(substanceLabel, substanceAmount, substanceUnit, calorieAmount, totalAmount) {
+            const percentage = Math.round((calorieAmount/totalAmount) * 100);
             let htmlValue = `
-                <div class="total">
-                  <div class="label">
-                    <div class="substance">${substanceLabel}</div>
-                    <div class="amount">
-                      ${substanceAmount} ${substanceUnit === undefined ? '' : `<span class="unit"> ${substanceUnit}</span>`}
-                    </div>
-                   </div>
-                </div>
-                `;
+    <div class="total">
+      <div class="label">
+        <div class="substance">${substanceLabel} (${percentage}%)</div>
+        <div class="amount">
+          ${substanceAmount} <span class="unit"> ${substanceUnit}</span>
+        </div>
+       </div>
+    </div>
+    `;
             return self.$(htmlValue);
         };
 
         MacroTastic.prototype.initializeCustomRows = function() {
-            // Maxes (to remind me), Remainders, Remainders in terms of EGGS <3!!!
-            let self = this;
-            self.createRow('my-max', rowElement => {
-                rowElement.append(self.$('<h3>Max Macros</h3>'));
-                rowElement.append(self.createColumn('Fat', self.maxValues.fat, 'g'));
-                rowElement.append(self.createColumn('Net Carbs', self.maxValues.carbs, 'g'));
-                rowElement.append(self.createColumn('Protein', self.maxValues.protein, 'g'));
+            this.createRow('adjusted-totals', rowElement => {
+                rowElement.append(this.$('<h3>Adjusted Macros</h3>'));
+                rowElement.append(this.createColumn('Calories', this.currentValues.total, 'kCal', this.currentValues.total, this.maxValues.dailyCalories));
+                rowElement.append(this.createColumn('Fat', this.currentValues.fat, 'g', this.currentValues.fat * 9, this.currentValues.total));
+                rowElement.append(this.createColumn('Carbs', (this.currentValues.carbs - this.currentValues.fiber), 'g', (this.currentValues.carbs - this.currentValues.fiber) * 4, this.currentValues.total));
+                rowElement.append(this.createColumn('Protein', this.currentValues.protein, 'g', this.currentValues.protein * 4, this.currentValues.total));
             });
 
-            self.createRow('my-remainders', rowElement => {
-                const remainingMacros = self.getRemainingMacros(self.maxValues);
-                rowElement.append(self.$('<h3>Remaining Macros</h3>'));
-                rowElement.append(self.createColumn('Fat', remainingMacros.fat, 'g'));
-                rowElement.append(self.createColumn('Net Carbs', remainingMacros.carbs, 'g'));
-                rowElement.append(self.createColumn('Protein', remainingMacros.protein, 'g'));
+            this.createRow('my-max', rowElement => {
+                rowElement.append(this.$('<h3>Max Macros</h3>'));
+                rowElement.append(this.createColumn('Fat', this.maxValues.fat, 'g', this.maxValues.fat * 9, this.maxValues.dailyCalories));
+                rowElement.append(this.createColumn('Net Carbs', this.maxValues.carbs, 'g', this.maxValues.carbs * 4, this.maxValues.dailyCalories));
+                rowElement.append(this.createColumn('Protein', this.maxValues.protein, 'g', this.maxValues.protein * 4, this.maxValues.dailyCalories));
             });
-            self.createRow('my-eggs', rowElement => {
-                const remainingMacros = self.getRemainingMacros(self.maxValues);
-                const remainingEggCount = Math.max(0, Math.floor(Math.min(remainingMacros.fat / 5, remainingMacros.protein / 6)));
-                rowElement.append(self.$('<h3>Remaining Foods!</h3>'));
-                rowElement.append(self.createColumn('Whole Eggs', remainingEggCount, '🥚'))
+
+            this.createRow('my-remainders', rowElement => {
+                const remainingMacros = this.getRemainingMacros(this.maxValues);
+                rowElement.append(this.$('<h3>Remaining Macros</h3>'));
+                rowElement.append(this.createColumn('Fat', remainingMacros.fat, 'g', remainingMacros.fat * 9, this.maxValues.dailyCalories));
+                rowElement.append(this.createColumn('Net Carbs', remainingMacros.carbs, 'g', remainingMacros.carbs * 4, this.maxValues.dailyCalories));
+                rowElement.append(this.createColumn('Protein', remainingMacros.protein, 'g', remainingMacros.protein * 4, this.maxValues.dailyCalories));
             });
         };
 
@@ -129,11 +135,18 @@ Here is a popular calculator: https://ketogains.com/ketogains-calculator/
     })(jqueryInstance);
 
     // lets make this script an object so we can encapsulate everything and pass the maxValues object as a param when we initiate
+    /*
+         My macros are based on my body height/type/shape and my
+         fitness goals. Get yours from your personal trainer or online calculator :)
+
+         Here is a popular calculator: https://ketogains.com/ketogains-calculator/
+     */
     new MacroTastic({
-        fat: 133,
-        carbs: 20,
-        protein: 110,
-        weeklyCalories: 12005,
-        dailyCalories: 1715,
+        fat: 76,
+        carbs: 329,
+        protein: 175,
+        // 1g fat = 9 Calories,
+        // 1g Carbs or Protein = 4 calories.
+        dailyCalories: 2700,
     });
 })(jQuery);
