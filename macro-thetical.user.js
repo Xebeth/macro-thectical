@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         macro-thetical
 // @namespace    http://paulbaker.io
-// @version      0.6.4
+// @version      0.6.5
 // @description  Reads my macros, prints out how many I have left, and some hypothetical foods I can still eat with my allowance :)
 // @author       Paul Nelson Baker, wguJohnKay, Xebeth
 // @match        https://www.fitbit.com/foods/log
@@ -20,19 +20,19 @@
         return +(Math.round(this + "e+" + places) + "e-" + places);
     }
 
-    let MacroTastic = (function(jqueryInstance) {
+    const MacroTastic = (function(jqueryInstance) {
 
-        function MacroTastic(maxValues) {
-            let self = this;
-            self.maxValues = {};
-            self.maxValues.fat = maxValues.fat || 0;
-            self.maxValues.carbs = maxValues.carbs || 0;
-            self.maxValues.protein = maxValues.protein || 0;
+        function MacroTastic(maxValuesDefaults) {
+            this.maxValues = {};
+            this.$ = jqueryInstance;
+            this.maxValues.fat = maxValuesDefaults.fat || 0;
+            this.maxValues.carbs = maxValuesDefaults.carbs || 0;
+            this.maxValues.protein = maxValuesDefaults.protein || 0;
             // 1g fat = 9 Calories,
             // 1g Carbs or Protein = 4 calories.
-            self.maxValues.dailyCalories = maxValues.dailyCalories || (self.maxValues.fat * 9 + (self.maxValues.carbs + self.maxValues.protein) * 4);
+            this.maxValues.dailyCalories = maxValuesDefaults.dailyCalories || (this.maxValues.fat * 9 + (this.maxValues.carbs + this.maxValues.protein) * 4);
 
-            self.currentValues = {
+            this.currentValues = {
                 fat: 0,
                 carbs: 0,
                 fiber: 0,
@@ -40,91 +40,216 @@
                 total: 0
             };
 
-            self.$ = jqueryInstance;
-            self.$("body").on('DOMSubtreeModified', "#foodlog", () => {
-                self.initializeCustomRows();
-            });
-            self.initializeCustomRows();
+            this.processing = {};
+            this.hideAfterLoad = {};
 
+            jqueryInstance("body").on('DOMSubtreeModified', "#foodlog", () => {
+                this.initialize();
+            });
+            this.initialize();
         }
 
-        MacroTastic.prototype.parseMacroValue = function(macroJQuerySelector) {
-            let self = this;
-            let currentMacroElement = self.$(macroJQuerySelector);
-            let currentMacroText = currentMacroElement.text();
-            let currentMacroValue = parseFloat(currentMacroText.replace(/\s+g/gi, ''))
+        MacroTastic.prototype.scaleNutritionValue = function(value, ratio, regex, precision, elt) {
+            const matches = value.match(regex);
+
+            if (matches && matches.length > 1) {
+                value = Number(matches[1]);
+
+                if (value > 0) {
+                    elt.text(matches.input.replace(matches[1], (value * ratio).round(precision)));
+                }
+            }
+        };
+
+        MacroTastic.prototype.toggleNutritionTooltip = function(event) {
+            const elt = this.$(event.currentTarget);
+            // retrieve the onclick attribute that contains the link to the food nutrition page
+            const link = elt.attr('onclick');
+            // extract the URL
+            const matches = link.match(/window.location='(.*)'/);
+
+            if (matches.length === 2) {
+                const parentElt = elt.parent();
+                // the food ID is the last part of the URL
+                const foodID = matches[1].split('/').slice(-1);
+                // the same food ID could be listed twice with different values
+                const uniqueID = foodID + '-' + parentElt.parent().attr('id').split('_').splice(-1);
+                // prevent processing the same food twice while the AJAX request is still processing
+                if (this.processing[uniqueID]) {
+                    // if we've left the hover area before the end of the processing, flag the tooltip as hidden
+                    this.hideAfterLoad[uniqueID] = event.type === 'mouseleave';
+
+                    return;
+                }
+                // check if the tooltip exists
+                let foodInfo = this.$('#food-' + uniqueID);
+
+                if (!foodInfo.length && event.type === 'mouseenter') {
+                    // the tooltip doesn't exist
+                    this.processing[uniqueID] = true;
+                    // load the food nutrition page
+                    this.$.ajax({url: matches[1]}).done((html) => {
+                        const body = this.$('body');
+                        const content = this.$(html);
+                        // check if the CSS for the tooltip content already exists
+                        let stylesheet = this.$('#foodInfoCSS');
+                        // append the stylesheet to the body, if necessary
+                        if (!stylesheet.length) {
+                            // retrieve the link element
+                            stylesheet = content.filter('link[href^="https://gcs-assets.fitbit.com/prod/app.foods.foodViewFood"]');
+
+                            if (stylesheet.length) {
+                                body.append(stylesheet.attr('id', 'foodInfoCSS'));
+                            }
+                        }
+                        // retrieve the nutrition info div to use as the tooltip content
+                        foodInfo = content.find('#contentBody .nutritionInfo .nutrition:first-child');
+                        // scale the nutrition info for the current food
+                        this.scaleNutritionInfo(foodInfo, parentElt);
+                        // check if we need to hide the tooltip after a mouseleave event
+                        const displayValue = this.hideAfterLoad[uniqueID] ? 'none' : 'block';
+                        // create the tooltip container and position it under the food entry
+                        const foodInfoContainer = this.$( `<div id="food-${uniqueID}" style="position: absolute; display: ${displayValue}; z-index:2; width: 303px; top: ${event.pageY + 16}px; left: ${event.pageX}px"></div>` );
+                        // add the nutrition info div to the tooltip container
+                        body.append(foodInfoContainer.html(foodInfo));
+                        // remove the flags after processing
+                        delete this.hideAfterLoad[uniqueID];
+                        delete this.processing[uniqueID];
+                    });
+                } // the tooltip already exists
+                else if (foodInfo.length) {
+                    // if the mouse left the food entry
+                    if (event.type === 'mouseleave') {
+                        // hide the container
+                        foodInfo.hide();
+                    } // the mouse entered a food entry
+                    else {
+                        // scale the nutrition info for the current food
+                        this.scaleNutritionInfo(foodInfo, elt.parent());
+                        // reposition the tooltip container relative to the mouse and show it
+                        foodInfo.css('top', (event.pageY + 16) + 'px').css('left', event.pageX + 'px').show();
+                    }
+                }
+            }
+        };
+
+        MacroTastic.prototype.scaleNutritionInfo = function(foodInfo, parentElt) {
+            // find all the nutrition values
+            let servingRatio = 1;
+            const caloriesElt = parentElt.siblings('.cols3');
+            const mineralsPerc = foodInfo.find('.minerals td');
+            const valuesHolders = foodInfo.find('.line .holder');
+            const valuesPercHolders = foodInfo.find('.line .holder_strong');
+            const calories = caloriesElt.text();
+
+            valuesHolders.each((index, valueElt) => {
+                const target = this.$(valueElt);
+                let value = target.prop('innerText').trim();
+
+                if (calories === value) {
+                    return false;
+                }
+                else if (index === 0) {
+                    servingRatio = Number(calories) / Number(value);
+                    target.text(calories);
+                }
+                else if (value) {
+                    this.scaleNutritionValue(value, servingRatio, /([0-9.,]+)([^0-9.,]*)/, 1, target);
+                }
+            });
+
+            if (servingRatio !== 1) {
+                valuesPercHolders.each((index, valueElt) => {
+                    const target = this.$(valueElt);
+                    let value = target.prop('innerText').trim();
+
+                    this.scaleNutritionValue(value, servingRatio, /([0-9.,]+)([%])/, 0, target);
+                });
+
+                mineralsPerc.each((index, valueElt) => {
+                    const target = this.$(valueElt);
+                    let value = target.prop('innerText').trim();
+
+                    this.scaleNutritionValue(value, servingRatio, /([0-9.,]+)([%])/, 0, target);
+                });
+            }
+
+            foodInfo.find('.left_light_label').first().children('.holder').text(parentElt.siblings('.cols2').prop('innerText'));
+        };
+
+        MacroTastic.prototype.parseMacroValue = function (macroJQuerySelector) {
+            const currentMacroElement = this.$(macroJQuerySelector);
+            const currentMacroText = currentMacroElement.text();
+            const currentMacroValue = parseFloat(currentMacroText.replace(/\s+g/gi, ''))
             return currentMacroValue;
         };
 
         MacroTastic.prototype.getRemainingMacros = function(maxValues) {
-            let self = this;
-            let fatSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(3) > div > div.amount';
-            let carbsSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(5) > div > div.amount';
-            let fiberSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(4) > div > div.amount';
-            let proteinSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(7) > div > div.amount';
-            let caloriesSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(2) > div > div.amount';
+            const fatSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(3) > div > div.amount';
+            const carbsSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(5) > div > div.amount';
+            const fiberSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(4) > div > div.amount';
+            const proteinSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(7) > div > div.amount';
+            const caloriesSelector = '#dailyTotals > div.content.firstBlock > div:nth-child(2) > div > div.amount';
 
-
-            self.currentValues.fat = self.parseMacroValue(fatSelector);
-            self.currentValues.carbs = self.parseMacroValue(carbsSelector);
-            self.currentValues.fiber = self.parseMacroValue(fiberSelector);
-            self.currentValues.protein = self.parseMacroValue(proteinSelector);
-            self.currentValues.total = self.parseMacroValue(caloriesSelector);
+            this.currentValues.fat = this.parseMacroValue(fatSelector);
+            this.currentValues.carbs = this.parseMacroValue(carbsSelector);
+            this.currentValues.fiber = this.parseMacroValue(fiberSelector);
+            this.currentValues.protein = this.parseMacroValue(proteinSelector);
+            this.currentValues.total = this.parseMacroValue(caloriesSelector);
 
             return {
-                'fat': self.maxValues.fat - self.currentValues.fat,
-                'carbs': self.maxValues.carbs - self.currentValues.carbs,
-                'protein': self.maxValues.protein - self.currentValues.protein,
-                'total': self.maxValues.dailyCalories - self.currentValues.total + self.currentValues.fiber *4
+                'fat': maxValues.fat - this.currentValues.fat,
+                'carbs': maxValues.carbs - this.currentValues.carbs,
+                'protein': maxValues.protein - this.currentValues.protein,
+                'total': maxValues.dailyCalories - this.currentValues.total + this.currentValues.fiber * 4
             };
         };
 
         MacroTastic.prototype.createRowContainer = function() {
             // Create all the rows
-            let self = this;
-            let customRowsSelector = 'div#my-custom-rows';
-            if (self.$(customRowsSelector).length === 0 || self.$(customRowsSelector).is(":hidden")) {
-                self.$('div#dailyTotals').append('<div id="my-custom-rows"></div>');
+            const customRowsSelector = 'div#my-custom-rows';
+
+            if (this.$(customRowsSelector).length === 0 || this.$(customRowsSelector).is(":hidden")) {
+                this.$('div#dailyTotals').append('<div id="my-custom-rows"></div>');
             }
         };
 
-        MacroTastic.prototype.createRow = function(rowElementId, title, rowInitializerCallback) {
-            let self = this;
-            self.createRowContainer();
+        MacroTastic.prototype.toggleRow = function(collapsed, toggleSpan) {
+            const collapsible = toggleSpan.next();
+            const heightValue = collapsed ? '0px' : '100%';
+            const padding = collapsed ? '1px 21px 1px 19px' : '20px 21px 15px 19px';
 
-            let customRowsElement = self.$('div#my-custom-rows');
-            let selector = 'div#' + rowElementId;
+            toggleSpan.text(collapsed ? '🞃' : '🞁');
+            collapsible.css('height', heightValue);
+            collapsible.css('padding', padding);
 
-            function toggleRow(collapsed, toggleSpan) {
-                const collapsible = toggleSpan.next();
-                const heightValue = collapsed ? '0px' : '100%';
-                const padding = collapsed ? '1px 21px 1px 19px' : '20px 21px 15px 19px';
+            return collapsed;
+        }
 
-                toggleSpan.text(collapsed ? '🞃' : '🞁');
-                collapsible.css('height', heightValue);
-                collapsible.css('padding', padding);
+        MacroTastic.prototype.createRow = function (rowElementId, title, rowInitializerCallback) {
+            this.createRowContainer();
 
-                return collapsed;
-            }
+            const customRowsElement = this.$('div#my-custom-rows');
+            const selector = 'div#' + rowElementId;
 
-            if (self.$(selector).length === 0) {
+            if (this.$(selector).length === 0) {
                 customRowsElement.append(`<div id="${rowElementId}" class="container">
                     <span class="toggle" style="float:right;cursor:pointer;" title="${title}">🞁</span>
                     <div class="content" style="height:100%;overflow:hidden"></div>
                 </div>`);
-                let resultElement = self.$(selector);
+                const resultElement = this.$(selector);
                 const hideSpan = resultElement.find(">:first-child");
                 const collapsed = GM_getValue(rowElementId + '-state');
 
-                hideSpan.click(function() {
+                hideSpan.click((e) => {
                     const collapsed = GM_getValue(rowElementId + '-state') || false;
-                    const $self = self.$(this);
+                    const elt = this.$(e.currentTarget);
 
-                    GM_setValue(rowElementId + '-state', toggleRow(!collapsed, $self));
+                    GM_setValue(rowElementId + '-state', this.toggleRow(!collapsed, elt));
                 });
 
                 if (collapsed) {
-                    toggleRow(collapsed, hideSpan);
+                    this.toggleRow(collapsed, hideSpan);
                 }
 
                 rowInitializerCallback(hideSpan.next(), title);
@@ -133,7 +258,7 @@
 
         MacroTastic.prototype.createColumn = function(substanceLabel, substanceAmount, substanceUnit, calorieAmount, totalAmount) {
             const percentage = calorieAmount ? ((calorieAmount/totalAmount) * 100).round() : 0;
-            let htmlValue = `
+            const htmlValue = `
     <div class="total">
       <div class="label">
         <div class="substance">${substanceLabel} (${percentage}%)</div>
@@ -143,12 +268,15 @@
        </div>
     </div>
     `;
-            return self.$(htmlValue);
+            return this.$(htmlValue);
         };
 
-        MacroTastic.prototype.initializeCustomRows = function() {
+        MacroTastic.prototype.initialize = function() {
+            // init mouse over of food items
+            jqueryInstance('.foodLink').hover((e) => this.toggleNutritionTooltip(e));
+
             this.createRow('adjusted-totals', 'Adjusted Macros', (rowElement, title) => {
-            	const adjustedCalories = this.currentValues.total - this.currentValues.fiber * 4;
+                const adjustedCalories = this.currentValues.total - this.currentValues.fiber * 4;
 
                 rowElement.append(this.$('<h3>' + title + '</h3>'));
                 rowElement.append(this.createColumn('Calories', adjustedCalories , 'kCal', adjustedCalories, adjustedCalories));
