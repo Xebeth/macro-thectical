@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         macro-thetical
 // @namespace    http://paulbaker.io
-// @version      0.6.5
+// @version      0.6.6
 // @description  Reads my macros, prints out how many I have left, and some hypothetical foods I can still eat with my allowance :)
 // @author       Paul Nelson Baker, wguJohnKay, Xebeth
 // @match        https://www.fitbit.com/foods/log
@@ -25,12 +25,16 @@
         function MacroTastic(maxValuesDefaults) {
             this.maxValues = {};
             this.$ = jqueryInstance;
-            this.maxValues.fat = maxValuesDefaults.fat || 0;
-            this.maxValues.carbs = maxValuesDefaults.carbs || 0;
-            this.maxValues.protein = maxValuesDefaults.protein || 0;
+            this.maxValues.fat = Number(GM_getValue('macros-fat-goal')) || maxValuesDefaults.fat || 0;
+            this.maxValues.carbs = Number(GM_getValue('macros-carbs-goal')) || maxValuesDefaults.carbs || 0;
+            this.maxValues.protein = Number(GM_getValue('macros-protein-goal')) || maxValuesDefaults.protein || 0;
             // 1g fat = 9 Calories,
             // 1g Carbs or Protein = 4 calories.
             this.maxValues.dailyCalories = maxValuesDefaults.dailyCalories || (this.maxValues.fat * 9 + (this.maxValues.carbs + this.maxValues.protein) * 4);
+
+            GM_setValue('macros-protein-goal', this.maxValues.protein);
+            GM_setValue('macros-carbs-goal', this.maxValues.carbs);
+            GM_setValue('macros-fat-goal', this.maxValues.fat);
 
             this.currentValues = {
                 fat: 0,
@@ -219,9 +223,8 @@
             const heightValue = collapsed ? '0px' : '100%';
             const padding = collapsed ? '1px 21px 1px 19px' : '20px 21px 15px 19px';
 
-            toggleSpan.text(collapsed ? '🞃' : '🞁');
-            collapsible.css('height', heightValue);
-            collapsible.css('padding', padding);
+            toggleSpan.text(collapsed ? '▼' : '▲');
+            collapsible.css('height', heightValue).css('padding', padding);
 
             return collapsed;
         }
@@ -252,18 +255,47 @@
                     this.toggleRow(collapsed, hideSpan);
                 }
 
-                rowInitializerCallback(hideSpan.next(), title);
+                rowInitializerCallback(hideSpan.next(), title, rowElementId);
             }
         };
 
-        MacroTastic.prototype.createColumn = function(substanceLabel, substanceAmount, substanceUnit, calorieAmount, totalAmount) {
+        MacroTastic.prototype.editGoal = function(event, macro) {
+            const elt = this.$(event.currentTarget);
+            const amount = GM_getValue('macros-'+ macro +'-goal') || elt.text();
+            const input = this.$('<input style="max-width:64px" type="number" min="0" value="' + amount + '"></input>');
+
+            event.preventDefault();
+
+            input.on('change', (e) => {
+                let newAmount = Number(input.val());
+
+                newAmount = newAmount <= 0 ? 0 : newAmount;
+
+                GM_setValue('macros-'+ macro +'-goal', newAmount);
+                this.maxValues[macro] = newAmount;
+                elt.text(newAmount);
+
+                this.$('#my-max-calories-goal').text((this.maxValues.fat * 9 + (this.maxValues.carbs + this.maxValues.protein) * 4));
+            }).on('blur', (e) => {
+                input.remove();
+                elt.show();
+            });
+
+            elt.hide().parent().prepend(input);
+            input.focus().select();
+        };
+
+        MacroTastic.prototype.createColumn = function(rowID, substanceLabel, substanceAmount, substanceUnit, calorieAmount, totalAmount, editable) {
             const percentage = calorieAmount ? ((calorieAmount/totalAmount) * 100).round() : 0;
+            const goalSpanID = rowID + '-' + substanceLabel.toLowerCase() + '-goal';
+            const valueElement = editable ? 'a' : 'span';
+            const attrs = editable ? 'href="#"' : '';
             const htmlValue = `
     <div class="total">
       <div class="label">
         <div class="substance">${substanceLabel} (${percentage}%)</div>
         <div class="amount">
-          ${substanceAmount.round()} <span class="unit"> ${substanceUnit}</span>
+          <${valueElement} ${attrs} id="${goalSpanID}">${substanceAmount.round()}</${valueElement}> <span class="unit"> ${substanceUnit}</span>
         </div>
        </div>
     </div>
@@ -275,32 +307,37 @@
             // init mouse over of food items
             jqueryInstance('.foodLink').hover((e) => this.toggleNutritionTooltip(e));
 
-            this.createRow('adjusted-totals', 'Adjusted Macros', (rowElement, title) => {
+            this.createRow('adjusted-totals', 'Adjusted Macros', (rowElement, title, rowID) => {
                 const adjustedCalories = this.currentValues.total - this.currentValues.fiber * 4;
 
                 rowElement.append(this.$('<h3>' + title + '</h3>'));
-                rowElement.append(this.createColumn('Calories', adjustedCalories , 'kCal', adjustedCalories, adjustedCalories));
-                rowElement.append(this.createColumn('Fat', this.currentValues.fat, 'g', this.currentValues.fat * 9, adjustedCalories));
-                rowElement.append(this.createColumn('Carbs', (this.currentValues.carbs - this.currentValues.fiber), 'g', (this.currentValues.carbs - this.currentValues.fiber) * 4, adjustedCalories));
-                rowElement.append(this.createColumn('Fibers', this.currentValues.fiber, 'g', this.currentValues.fiber * 4, adjustedCalories));
-                rowElement.append(this.createColumn('Protein', this.currentValues.protein, 'g', this.currentValues.protein * 4, adjustedCalories));
+                rowElement.append(this.createColumn(rowID, 'Calories', adjustedCalories , 'kCal', adjustedCalories, adjustedCalories));
+                rowElement.append(this.createColumn(rowID, 'Fat', this.currentValues.fat, 'g', this.currentValues.fat * 9, adjustedCalories));
+                rowElement.append(this.createColumn(rowID, 'Carbs', (this.currentValues.carbs - this.currentValues.fiber), 'g', (this.currentValues.carbs - this.currentValues.fiber) * 4, adjustedCalories));
+                rowElement.append(this.createColumn(rowID, 'Fibers', this.currentValues.fiber, 'g', this.currentValues.fiber * 4, adjustedCalories));
+                rowElement.append(this.createColumn(rowID, 'Protein', this.currentValues.protein, 'g', this.currentValues.protein * 4, adjustedCalories));
             });
 
-            this.createRow('my-max', 'Max Macros', (rowElement, title) => {
+            this.createRow('my-max', 'Max Macros', (rowElement, title, rowID) => {
                 rowElement.append(this.$('<h3>' + title + '</h3>'));
-                rowElement.append(this.createColumn('Calories', this.maxValues.dailyCalories, 'kCal', this.maxValues.dailyCalories, this.maxValues.dailyCalories));
-                rowElement.append(this.createColumn('Fat', this.maxValues.fat, 'g', this.maxValues.fat * 9, this.maxValues.dailyCalories));
-                rowElement.append(this.createColumn('Carbs', this.maxValues.carbs, 'g', this.maxValues.carbs * 4, this.maxValues.dailyCalories));
-                rowElement.append(this.createColumn('Protein', this.maxValues.protein, 'g', this.maxValues.protein * 4, this.maxValues.dailyCalories));
+                rowElement.append(this.createColumn(rowID, 'Calories', this.maxValues.dailyCalories, 'kCal', this.maxValues.dailyCalories, this.maxValues.dailyCalories));
+                rowElement.append(this.createColumn(rowID, 'Fat', this.maxValues.fat, 'g', this.maxValues.fat * 9, this.maxValues.dailyCalories, true));
+                rowElement.append(this.createColumn(rowID, 'Carbs', this.maxValues.carbs, 'g', this.maxValues.carbs * 4, this.maxValues.dailyCalories, true));
+                rowElement.append(this.createColumn(rowID, 'Protein', this.maxValues.protein, 'g', this.maxValues.protein * 4, this.maxValues.dailyCalories, true));
+
+                this.$('#' + rowID + '-protein-goal').click((e) => this.editGoal(e, 'protein'));
+                this.$('#' + rowID + '-carbs-goal').click((e) => this.editGoal(e, 'carbs'));
+                this.$('#' + rowID + '-fat-goal').click((e) => this.editGoal(e, 'fat'));
+
             });
 
-            this.createRow('my-remainders', 'Remaining Macros', (rowElement, title) => {
+            this.createRow('my-remainders', 'Remaining Macros', (rowElement, title, rowID) => {
                 const remainingMacros = this.getRemainingMacros(this.maxValues);
                 rowElement.append(this.$('<h3>' + title + '</h3>'));
-                rowElement.append(this.createColumn('Calories', remainingMacros.total, 'kCal', remainingMacros.total, this.maxValues.dailyCalories));
-                rowElement.append(this.createColumn('Fat', remainingMacros.fat, 'g', remainingMacros.fat * 9, this.maxValues.fat * 9));
-                rowElement.append(this.createColumn('Carbs', remainingMacros.carbs, 'g', remainingMacros.carbs * 4, this.maxValues.carbs * 4));
-                rowElement.append(this.createColumn('Protein', remainingMacros.protein, 'g', remainingMacros.protein * 4, this.maxValues.protein * 4));
+                rowElement.append(this.createColumn(rowID, 'Calories', remainingMacros.total, 'kCal', remainingMacros.total, this.maxValues.dailyCalories));
+                rowElement.append(this.createColumn(rowID, 'Fat', remainingMacros.fat, 'g', remainingMacros.fat * 9, this.maxValues.fat * 9));
+                rowElement.append(this.createColumn(rowID, 'Carbs', remainingMacros.carbs, 'g', remainingMacros.carbs * 4, this.maxValues.carbs * 4));
+                rowElement.append(this.createColumn(rowID, 'Protein', remainingMacros.protein, 'g', remainingMacros.protein * 4, this.maxValues.protein * 4));
             });
         };
 
@@ -315,8 +352,8 @@
          Here is a popular calculator: https://ketogains.com/ketogains-calculator/
      */
     new MacroTastic({
-        fat: 78,
-        carbs: 336,
-        protein: 176
+        fat: 98,
+        carbs: 363,
+        protein: 216
     });
 })(jQuery);
