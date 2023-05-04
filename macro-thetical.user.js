@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         macro-thetical
 // @namespace    http://paulbaker.io
-// @version      0.6.6
+// @version      0.6.6.1
 // @description  Reads my macros, prints out how many I have left, and some hypothetical foods I can still eat with my allowance :)
 // @author       Paul Nelson Baker, wguJohnKay, Xebeth
 // @match        https://www.fitbit.com/foods/log
@@ -205,7 +205,7 @@
                 'fat': maxValues.fat - this.currentValues.fat,
                 'carbs': maxValues.carbs - this.currentValues.carbs,
                 'protein': maxValues.protein - this.currentValues.protein,
-                'total': maxValues.dailyCalories - this.currentValues.total + this.currentValues.fiber * 4
+                'total': maxValues.dailyCalories - this.currentValues.total,
             };
         };
 
